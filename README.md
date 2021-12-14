@@ -5,7 +5,7 @@ I think the end result turned out pretty cool, considering how busy we were with
 I'm planning to release a stripped version of the game on IndieDB. I'm afraid I won't be able to upload all of the original maps. 
 I have some concerns about copyrights and more so, the possibility of copyright infringement on maps that I didn't make. 
 
-Feel free to do whatever you want to do with the **Source Code**.
+Feel free to do whatever you want to do with this.
 
 # Screenshots 
 ![Map #1](https://github.com/MartyLocke/HWLEngine/blob/main/IMAGES/1.png?raw=true)
