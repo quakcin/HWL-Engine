@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<!--
+    -- MapEdit : 1.8
+    -- HWL Engine Dev Kit
+-->
+<html>
+  <head>
+    <title> MapEdit | 1.8 </title>
+    <style>
+      body
+      {
+        padding: 0px;
+        margin: 0px;
+      }
+      #tx_sel
+      {
+        position: fixed;
+        top: 0px;
+        left: 90000px;
+        width: 100vw;
+        height: 90vh;
+        background-color: black;
+        opacity: 0.9;
+      }
+
+      #tx_sel > img
+      {
+        width: 65px;
+        height: 65px;
+        cursor: pointer;
+      }
+
+      #tx_sel > div
+      {
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 20px;
+        color: #000000;
+      }
+
+      #tx_edit
+      {
+        position: fixed;
+        left: 9999999px;
+        top: 38vh;
+        width: 20vw;
+        height: 24vh;
+        background-color: white;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 22px;
+        padding: 20px;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+
+    <canvas id="render" width="8192" height="8192"></canvas>
+    <div id="tx_sel">
+      <div style="background-color: white;">
+        [Loading:] load <b>map</b> file:
+        <input type="file" onchange="loadMap(this);"> 
+
+        <b>or</b> load <b>light</b> file:
+        <input type="file" onchange="loadLight(this);">
+
+      </div>
+    </div>
+
+    <div id="tx_edit">
+      <p> Editing Tools </p>
+
+      <b style="font-size: 18px;">Tiles: </b>
+      <select id="opt_tiles">
+        <option value="paint">Paint</option>
+        <option value="line">Line</option>
+        <option value="rect">Rectangle</option>
+        <option value="circ_r">Circe (r)</option>
+        <option value="circ_d">Circe (d)</option>
+      </select> <br>
+
+      <b style="font-size: 18px;">Light: </b>
+      <select id="opt_lms">
+        <option value="paint">Paint</option>
+        <option value="emmit_a">Emmiter (AVG)</option>
+        <option value="emmit_s">Emmiter (shortest)</option>
+        <option value="emmit_d">Emmiter (min dim)</option>
+      </select> <br>
+
+      <p style="color: red; cursor: pointer" onclick="tx_edit.style='left: 99999px;'"> - close -</p>
+
+    </div>
+
+    <script>
+
+      // -- < random blob saver from stackoverflow >
+
+      var downloadBlob, downloadURL;
+
+      downloadBlob = function(data, fileName, mimeType) {
+        var blob, url;
+        blob = new Blob([data], {
+          type: mimeType
+        });
+        url = window.URL.createObjectURL(blob);
+        downloadURL(url, fileName);
+        setTimeout(function() {
+          return window.URL.revokeObjectURL(url);
+        }, 1000);
+      };
+
+      downloadURL = function(data, fileName) {
+        var a;
+        a = document.createElement('a');
+        a.href = data;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.style = 'display: none';
+        a.click();
+        a.remove();
+      };
+
+      const getRand = function (min, max) 
+      {
+        return Math.floor(Math.random() * (max - min + 1) + min);
+      }
+
+      // -- < / random blob saver from stackoverflow >
+
+      // -- ours code:
+
+      let F_NEWMAP = true;
+
+      let tiles = new Uint8Array(256 * 256); // 64KB MEM
+      let lms = new Uint8Array(128 * 128); // 16KB MEM
+      let path = prompt("Map Path:");
+      let count;
+      let props;
+
+      if (path == "")
+      {
+        // load from localStorage
+        path = localStorage.getItem("mpedit_path");
+        count = parseInt(localStorage.getItem("mpedit_count"));
+        props = parseInt(localStorage.getItem("mpedit_props"));
+        const d_map = localStorage.getItem("mpedit_map");
+        const d_lms = localStorage.getItem("mpedit_light");
+        F_NEWMAP = false;
+
+
+
+        if (d_map != null)
+        {
+          tiles = new TextEncoder().encode(d_map);
+          console.log(tiles);
+        }
+
+        if (d_lms != null)
+        {
+          // lms = new TextEncoder().encode(d_lms);
+          // console.log(lms);
+
+          // -- todo
+        }
+
+      }
+      else
+      {
+        if (path[path.length - 1] != "/")
+          path += "/";
+
+        count = parseInt(prompt("Textures Count: "));
+        props = parseInt(prompt("Props Count: "));
+      }
+
+      let __render_def_spacing = 31;
+
+      const loadTextrues = function()
+      {
+        for (let i = 1; i <= count; i++)
+        {
+          document.getElementById("tx_sel").innerHTML += `<img id="tx_${i}" src="${path}/textures/${i}.png" onclick="selected = ${i};">`;
+        }
+      }
+
+      const loadProps = function()
+      {
+        for (let i = 0; i < props; i++)
+        {
+          document.getElementById("tx_sel").innerHTML += `<img id="tx_${255 - i}" src="${path}/textures/${255 - i}.png" onclick="selected = ${255 - i};">`;
+        }
+      }
+
+      // -- < LIGHTMAPS >
+
+      let f_lightmaps = false;
+      let lm_select = 0;
+      const lm_mask = [3, 12, 48, 192];
+      const lm_colors = ['rgba(18, 14, 6, 0.8)', 'rgba(71, 54, 24, 0.8)', 'rgba(156, 122, 65, 0.8)', 'rgba(255, 205, 120, 0.8)'];
+
+      // [ll, hl, lh, hh] -> 1 byte
+
+      // -- initialize lms with ambient pitch darkness
+      if (F_NEWMAP)
+        for (let i = 0; i < 128 * 128; i++)
+          lms[i] = 0;
+
+      // x, y has to be definitve 256x256 tile map sizing
+      const set_lm = function (x, y, value)
+      {
+        if (value >= 4)
+        {
+          //alert("LIGHT MAP: VALUE EXCEEDS ITS RANGE <0, 3>");
+          return;
+        }
+        const offset = (2 * (y & 1) + (x & 1));
+        const lm_pos = (y >> 1) * 128 + (x >> 1);
+        let cval = lms[lm_pos];
+        cval &= ~(3 << (offset<<1))
+        cval = cval ^ (value << (offset<<1));
+        lms[lm_pos] = cval;
+      }
+
+      const get_lm = function (x, y)
+      {
+        const offset = (2 * (y & 1) + (x & 1));
+        const lm_pos = (y >> 1) * 128 + (x >> 1);
+        let cval = lms[lm_pos];
+        return (cval & lm_mask[offset]) >> (offset << 1);
+      }
+
+
+      // -- < / LIGHTMAPS >
+
+      loadTextrues();
+      loadProps();
+
+      if (F_NEWMAP)
+        for (let i = 0; i < 0xFFFF; i++)
+          tiles[i] = 0;
+
+      let selected = 0;
+
+      const ctx = render.getContext("2d");
+
+      const screenUpdate = function(xmin = 0, ymin = 0, xmax = 255, ymax = 255)
+      {
+
+        for (let y = ymin; y <= ymax; y++)
+          for (let x = xmin; x <= xmax; x++)
+          {
+            const i = y * 256 + x;
+
+            ctx.fillStyle = "#707070";
+            ctx.fillRect(x * 32, y * 32, 32, 32);
+
+            if (x == 128 && y == 128)
+            {
+              ctx.fillStyle = "yellow";
+              ctx.fillRect(x * 32, y * 32, __render_def_spacing, __render_def_spacing);
+            }
+            else if (tiles[i] == 0)
+            {
+              ctx.fillStyle = "black";
+              ctx.fillRect(x * 32, y * 32, __render_def_spacing, __render_def_spacing);
+            }
+            else
+            {
+              const image = document.getElementById("tx_" + tiles[i]);
+              ctx.drawImage(image, x * 32, y * 32, __render_def_spacing, __render_def_spacing);
+            }
+
+            if (f_lightmaps)
+            {
+              // -- render lightmap
+              if (tiles[i] == 0)
+              {
+                ctx.fillStyle = lm_colors[get_lm(x, y)];
+                ctx.fillRect(x * 32, y * 32, __render_def_spacing, __render_def_spacing);
+              }
+            }
+
+          }
+      }
+      screenUpdate();
+
+      // --- Load Map
+
+      const parseMap = function(data)
+      {
+        console.log(data);
+        for (let i = 0; i < 0xFFFF; i++)
+          tiles[i] = parseInt(data[i]);
+        screenUpdate();
+      }
+
+      const loadMap = function(file)
+      {
+        const reader = new FileReader();
+        file = file.files[0];
+
+        reader.onload = function () {
+          parseMap(new Uint8Array(reader.result));
+        }
+
+        if (file)
+          reader.readAsArrayBuffer(file);
+      }
+
+      // --- Load Light
+
+      const parseLight = function(data)
+      {
+        console.log(data);
+        for (let i = 0; i < 128 * 128; i++)
+          lms[i] = parseInt(data[i]);
+        f_lightmaps = true;
+        screenUpdate();
+      }
+
+      const loadLight = function(file)
+      {
+        const reader = new FileReader();
+        file = file.files[0];
+
+        reader.onload = function () {
+          parseLight(new Uint8Array(reader.result));
+        }
+
+        if (file)
+          reader.readAsArrayBuffer(file);
+      }
+
+      let tx_sel_state = false;
+
+      document.onkeydown = function (e)
+      {
+        if (e.key == "w")
+        {
+          if (tx_sel_state)
+            document.getElementById("tx_sel").style = "left: 90000px;"
+          else
+            document.getElementById("tx_sel").style = "left: 0px;";
+          tx_sel_state = !tx_sel_state;
+        }
+        else if (e.key == "r")
+        {
+          screenUpdate();
+        }
+        else if (e.key == "q")
+        {
+          selected = 0;
+        }
+        else if (e.key == "c")
+        {
+          window.scrollTo(128 * 32 - (window.screen.width / 2), 128 * 32 - (window.screen.height / 2));
+        }
+        else if (e.key == "s")
+        {
+          downloadBlob(tiles, 'tiles', 'application/octet-stream');
+        }
+        else if (e.key == "e")
+        {
+          tx_edit.style = "left: 40vw;";
+        }
+        else if (e.key == "f")
+        {
+          if (__render_def_spacing == 31)
+            __render_def_spacing = 32;
+          else
+            __render_def_spacing = 31;
+          screenUpdate();
+        }
+        else if (e.key == "1" || e.key == "2" || e.key == "3" || e.key == "4")
+        {
+          lm_select = e.key.charCodeAt(0) - ("0").charCodeAt(0) - 1;
+        }
+        else if (e.key == "l")
+        {
+          f_lightmaps = !(f_lightmaps);
+          screenUpdate();
+        }
+        else if (e.key == "0")
+        {
+          downloadBlob(lms, 'light', 'application/octet-stream');
+        }
+        else if (e.key == "z")
+        {
+          // -- rollingback tile history
+          if (tile_history.length <= 0)
+            return;
+          const buff = (tile_history.splice(tile_history.length - 1, 1))[0];
+          for (let item of buff)
+          {
+            const index = item.y * 256 + item.x;
+            tiles[index] = item.v;
+            screenUpdate(item.x, item.y, item.x, item.y);
+          }
+
+        }
+        else if (e.key == "m")
+        {
+          // -- remember config stuff
+          localStorage.setItem("mpedit_path", path);
+          localStorage.setItem("mpedit_count", count);
+          localStorage.setItem("mpedit_props", props);
+
+          // -- remember tile map
+          localStorage.setItem(
+            "mpedit_map",
+            new TextDecoder().decode(tiles)
+          );
+          // -- remember lightmap
+          localStorage.setItem(
+            "mpedit_light",
+            new TextDecoder().decode(lms)
+          );
+
+          alert("Map Saved in browser history!");
+        }
+      
+      }
+
+
+      let tracker = {
+        dx: 0,
+        dy: 0,
+        ready: false
+      };
+
+      let tile_calls = [];
+      let tile_history = [];
+      let history_buffer = [];
+
+      // -- Main Tile Editing Function
+
+      const get_tile = function(x, y)
+      {
+        const index = y * 256 + x;
+        return tiles[index];
+      }
+
+      const set_tile = function (x, y, val)
+      {
+        if (x == 128 && y == 128)
+        {
+          console.log("ILLEGAL TILE SELECTED!, CANNOT EDIT PLAYER STARTING POSITION!!!");
+          return -1;
+        }
+
+        const index = y * 256 + x;
+
+        history_buffer.push({
+          x: x,
+          y: y,
+          v: tiles_copy[index]
+        });
+
+        tiles[index] = val;
+        screenUpdate(x, y, x, y);
+      }
+
+      const tile_circle = function (x, y, r)
+      {
+        const z = 3.1415 * r * r;
+
+        const delta = 360 / z;
+
+        for (let i = 0; i < 360; i += delta)
+        {
+          const ang = i * (3.1415 / 180);
+          const cx = Math.floor(Math.cos(ang) * r + x);
+          const cy = Math.floor(Math.sin(ang) * r + y);
+          set_tile(cx, cy, selected);
+        }
+
+      }
+
+      // -- Painting Functions 
+
+      tile_calls["line"] = function (x, y, dx, dy)
+      {
+        const ang = Math.atan2(dy - y, dx - x); 
+        const len = Math.sqrt(Math.pow(dx - x, 2) + Math.pow(dy - y, 2));
+
+        for (let i = 0; i <= len; i++)
+        {
+          const cx = Math.floor(Math.cos(ang) * i + x);
+          const cy = Math.floor(Math.sin(ang) * i + y);
+          set_tile(cx, cy, selected);
+        }
+
+      }
+
+      tile_calls["rect"] = function (x, y, dx, dy)
+      {
+        const cx = Math.min(x, dx);
+        const cy = Math.min(y, dy);
+        const cdx = Math.max(x, dx);
+        const cdy = Math.max(y, dy);
+
+        for (let i = cx; i <= cdx; i++)
+        {
+          set_tile(i, cy, selected);
+          set_tile(i, cdy, selected);
+        }
+
+        for (let i = cy; i <= cdy; i++)
+        {
+          set_tile(cx, i, selected);
+          set_tile(cdx, i, selected);
+        }
+
+      }
+
+      tile_calls["circ_r"] = function (x, y, dx, dy)
+      {
+        tile_circle(x, y, Math.sqrt(Math.pow(x - dx, 2) + Math.pow(y - dy, 2)));
+      }
+
+      tile_calls["circ_d"] = function (x, y, dx, dy)
+      {
+        const halfR = Math.sqrt(Math.pow(x - dx, 2) + Math.pow(y - dy, 2)) / 2;
+        tile_circle(x + halfR, y + halfR, halfR);
+      }
+
+      // --
+
+      let tiles_copy = new Uint8Array(256 * 256); // 64KB MEM
+
+      // --
+
+      const emmit_rays = function (x, y)
+      {
+        let xp, yp, xm, ym;
+        for (xp = 0; xp < 0xFF; xp++)
+          if (get_tile(x + xp, y)) break;
+        for (xm = 0; xm < 0xFF; xm++)
+          if (get_tile(x - xm, y)) break;
+
+        for (yp = 0; yp < 0xFF; yp++)
+          if (get_tile(x, y + yp)) break;
+        for (ym = 0; ym < 0xFF; ym++)
+          if (get_tile(x, y - ym)) break;
+
+        return [xm, ym, xp, yp];
+      }
+
+      const LMRAY = function(x, y, r)
+      {
+        const circ = 3.1415 * r * r;
+        const delta = 360 / circ;
+        for (let a = 0; a < 360; a += delta)
+        {
+          const ang = a * (3.1415 / 180);
+          for (let i = 0; i < r; i++)
+          {
+            const rx = parseInt(Math.round(Math.cos(ang) * i + x));
+            const ry = parseInt(Math.round(Math.sin(ang) * i + y));
+
+            if (get_tile(rx, ry) != 0)
+              break;
+
+            const color_index = parseInt((4 * i) / r);
+            if (lm_select == 3)
+              set_lm(rx, ry, 3 - color_index);
+            else if (lm_select == 0)
+              set_lm(rx, ry, color_index);
+
+          }
+        }
+        screenUpdate();
+      }
+
+      const emmit_a = function (x, y)
+      {
+        const rays = emmit_rays(x, y);
+        let avg = 0;
+        for (let r of rays)
+          avg += r;
+        avg /= 4;
+
+        LMRAY(x, y, avg);
+
+      }
+
+      const emmit_s = function (x, y)
+      {
+        const rays = emmit_rays(x, y);
+        let minr = rays[0];
+        for (let r of rays)
+          if (r < minr)
+            minr = r;
+        LMRAY(x, y, minr);
+      }
+
+      const emmit_d = function (x, y)
+      {
+        const rays = emmit_rays(x, y);
+        let wx = rays[0] + rays[2];
+        let wy = rays[1] + rays[3];
+        LMRAY(x, y, (wx < wy) ? wx : wy);
+      }
+
+      // --
+
+      render.onclick = function (e)
+      {
+        // console.log(e);
+        let x = e.offsetX;
+        let y = e.offsetY;
+
+        let mx = Math.floor(x / 32);
+        let my = Math.floor(y / 32);
+
+        // console.log(mx, my);
+
+        if (f_lightmaps == false)
+        {
+          // -- make copy of tiles
+
+
+          if (opt_tiles.value == 'paint')
+          {
+            tiles_copy = tiles.slice();
+            history_buffer = [];
+            set_tile(mx, my, selected);
+            tile_history.push(history_buffer);
+          }
+          else
+          {
+            if (tracker.ready)
+            {
+              // -- eval
+              tiles_copy = tiles.slice();
+              history_buffer = [];
+              (tile_calls[opt_tiles.value])(tracker.dx, tracker.dy, mx, my);
+              tracker.ready = false;
+              tile_history.push(history_buffer);
+            }
+            else
+            {
+              tracker.dx = mx;
+              tracker.dy = my;
+              tracker.ready = true;
+            }
+          }
+
+
+        }
+        else
+        {
+          // -- edit lightmaps
+
+          if (opt_lms.value == 'paint')
+            set_lm(mx, my, lm_select);
+          else if (opt_lms.value == 'emmit_a')
+            emmit_a(mx, my);
+          else if (opt_lms.value == 'emmit_s')
+            emmit_s(mx, my);
+          else if (opt_lms.value == 'emmit_d')
+            emmit_d(mx, my);
+        }
+
+        screenUpdate(mx, my, mx, my);
+      }
+      
+      // -- additional functions
+
+      const LMFILL = function (pitch)
+      {
+        if (pitch < 0 || pitch >= 4)
+        {
+          console.log("ERR! Invalid pitch value!");
+          return;
+        }
+        console.log("Please wait...");
+        for (let y = 0; y < 256; y++)
+          for (let x = 0; x < 256; x++)
+            set_lm(x, y, pitch);
+        console.log("Finished!");
+        f_lightmaps = true;
+        screenUpdate();
+      }
+
+      const LMRAND = function (smooth)
+      {
+        let color = getRand(0, 3);
+        for (let y = 0; y < 256; y++)
+          for (let x = 0; x < 256; x++)
+          {
+            if (smooth != 0)
+                color = (getRand(0, 100) < smooth) ? (color + (getRand(1, 3) - 2)) % 4 : color;
+            else
+              color = getRand(0, 3);
+
+            set_lm(x, y, color);
+          }
+          f_lightmaps = true;
+          screenUpdate();
+      }
+
+      const LMSHIFT = function ()
+      {
+        for (let y = 0; y < 256; y++)
+          for (let x = 0; x < 256; x++)
+          {
+            const col = get_lm(x, y);
+            set_lm(x, y, (col + 1) % 4);
+          }
+        screenUpdate();
+      }
+
+    </script>
+
+  </body>
+</html>
