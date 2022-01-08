@@ -1,8 +1,8 @@
 /*
 	Copyright (c) 2021 by:
-	Marcin Œlusarczyk (lead developer)
+	Marcin Åšlusarczyk (lead programmer)
 	Maciej Bandura
-	Szymon Œmiglarski
+	Szymon Åšmiglarski
 
 	Simple and inefficient Ray Casting Engine
 	written in C using Allegro 5 Library,
@@ -13,7 +13,6 @@
 #include "main.h"
 #include "root.h"
 #include "daemon.h"
-#include "test.h"
 #include "loader.h"
 #include "worker.h"
 #include "render.h"
