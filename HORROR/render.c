@@ -186,10 +186,10 @@ _escape_prop_renderer:
 
 	overlay_display(self->overlay, 640, 360, width, height);
 
-	if (self->player->health < 80)
+	if (self->player->health < 90)
 	{
-		int strength = 10 - (self->player->health / 10) + 5;
-		al_draw_filled_rectangle(0, 0, width, height, al_premul_rgba(117, 0, 0, strength));
+		float strength = 255 - self->player->health * 2.55;
+		al_draw_filled_rectangle(0, 0, width, height, al_map_rgba(50, 0, 0, strength));
 	}
 
 }
