@@ -28,5 +28,7 @@ int p_approx_dist(float xf, float yf, float dxf, float dyf)
 	int d1 = (abs(x - dx) * 362) >> 8;
 	int d2 = (abs(y - dy) * 362) >> 8;
 	int k = abs(d1 - d2) >> 3;
+  // This should be actually: return ((d1 + d2) >> 1) + k - but
+  // everything has been adjusted to work with the current version!
 	return ((d1 + d2) >> 2) + k;
 }
